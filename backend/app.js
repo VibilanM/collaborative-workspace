@@ -10,4 +10,8 @@ app.use("/health", healthRoutes);
 
 app.use(errorHandler);
 
+app.get("/", (req, res) => {
+    res.status(200).json({ message: "Welcome to the Collaborative Workspace API" });
+});
+
 export default app;
