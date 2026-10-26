@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import Document from "./models/document.model.js";
+import Document from "../models/document.model.js";
 
 function validId(id) {
     return mongoose.isValidObjectId(id);

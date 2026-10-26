@@ -1,4 +1,4 @@
-import { Router } from "expess";
+import { Router } from "express";
 
 import {
     createDocument,
