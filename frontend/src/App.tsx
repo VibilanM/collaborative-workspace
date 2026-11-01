@@ -1,573 +1,911 @@
-import { useRef, useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import type { CanvasDocument, Shape } from "./types";
+import type {
+  Shape,
+  Tool,
+  CanvasDocument,
+  ResizeHandle,
+  FillStyle,
+  StrokeStyle,
+} from "./types";
+import {
+  createId,
+  createSeed,
+  getShapeBounds,
+  isPointInShape,
+  getHandleAtPoint,
+  moveShape,
+  resizeShape,
+  isValidDocument,
+} from "./utils/math";
+import { renderCanvas } from "./utils/renderer";
+import { Toolbar } from "./components/Toolbar";
+import { PropertiesPanel } from "./components/PropertiesPanel";
+import { BottomControls } from "./components/BottomControls";
+import { JsonTab } from "./components/JsonTab";
 import "./App.css";
 
-type Tool = "select" | "rectangle" | "circle" | "line";
-
-const WIDTH = 1000;
-const HEIGHT = 700;
-
-function createId(): string {
-  return crypto.randomUUID();
-}
-
-function pointerPosition(
-  event: ReactPointerEvent<SVGSVGElement>
-) {
-  const rect = event.currentTarget.getBoundingClientRect();
-
-  return {
-    x: ((event.clientX - rect.left) / rect.width) * WIDTH,
-    y: ((event.clientY - rect.top) / rect.height) * HEIGHT,
-  };
-}
-
-function moveShape(
-  shape: Shape,
-  dx: number,
-  dy: number
-): Shape {
-  switch (shape.type) {
-    case "rectangle":
-    case "circle":
-      return { ...shape, x: shape.x + dx, y: shape.y + dy };
-
-    case "line":
-      return {
-        ...shape,
-        x1: shape.x1 + dx,
-        y1: shape.y1 + dy,
-        x2: shape.x2 + dx,
-        y2: shape.y2 + dy,
-      };
-  }
-}
-
-function isValidDocument(value: unknown): value is CanvasDocument {
-  if (
-    typeof value !== "object" ||
-    value === null
-  ) {
-    return false;
-  }
-
-  const doc = value as Record<string, unknown>;
-
-  if (
-    doc.version !== 1 ||
-    !Array.isArray(doc.shapes)
-  ) {
-    return false;
-  }
-
-  const ids = new Set<string>();
-
-  for (const raw of doc.shapes) {
-    if (
-      typeof raw !== "object" ||
-      raw === null
-    ) {
-      return false;
-    }
-
-    const s = raw as Record<string, unknown>;
-
-    if (
-      typeof s.id !== "string" ||
-      s.id.length === 0 ||
-      ids.has(s.id)
-    ) {
-      return false;
-    }
-
-    ids.add(s.id);
-
-    const number = (key: string) =>
-      typeof s[key] === "number" &&
-      Number.isFinite(s[key]);
-
-    if (s.type === "rectangle") {
-      if (
-        !number("x") ||
-        !number("y") ||
-        !number("width") ||
-        !number("height") ||
-        (s.width as number) < 0 ||
-        (s.height as number) < 0
-      ) {
-        return false;
-      }
-    } else if (s.type === "circle") {
-      if (
-        !number("x") ||
-        !number("y") ||
-        !number("radius") ||
-        (s.radius as number) < 0
-      ) {
-        return false;
-      }
-    } else if (s.type === "line") {
-      if (
-        !number("x1") ||
-        !number("y1") ||
-        !number("x2") ||
-        !number("y2")
-      ) {
-        return false;
-      }
-    } else {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function ShapeView({
-  shape,
-  selected,
-}: {
-  shape: Shape;
-  selected: boolean;
-}) {
-  const common = {
-    stroke: selected ? "#2563eb" : "#202124",
-    strokeWidth: selected ? 3 : 2,
-    fill: "transparent",
-    vectorEffect: "non-scaling-stroke" as const,
-  };
-
-  switch (shape.type) {
-    case "rectangle":
-      return (
-        <rect
-          {...common}
-          x={shape.x}
-          y={shape.y}
-          width={shape.width}
-          height={shape.height}
-        />
-      );
-
-    case "circle":
-      return (
-        <circle
-          {...common}
-          cx={shape.x}
-          cy={shape.y}
-          r={shape.radius}
-        />
-      );
-
-    case "line":
-      return (
-        <line
-          {...common}
-          x1={shape.x1}
-          y1={shape.y1}
-          x2={shape.x2}
-          y2={shape.y2}
-        />
-      );
-  }
-}
-
 export default function App() {
+  // Determine DEV or PROD mode (reads from backend .env via Vite define, or frontend env, or URL ?mode=...)
+  const backendEnvMode = (import.meta.env.VITE_BACKEND_MODE || "").toUpperCase();
+  const frontendEnvMode = (import.meta.env.VITE_APP_MODE || "").toUpperCase();
+  const [previewMode, setPreviewMode] = useState<"DEV" | "PROD">(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const qMode = urlParams.get("mode")?.toUpperCase();
+    if (qMode === "PROD" || qMode === "DEV") return qMode;
+    if (backendEnvMode === "PROD" || frontendEnvMode === "PROD") return "PROD";
+    return "DEV";
+  });
+
+  const isDevMode = previewMode === "DEV";
+
+  // Whiteboard Canvas State
   const [shapes, setShapes] = useState<Shape[]>([]);
   const [tool, setTool] = useState<Tool>("select");
+  const [isLocked, setIsLocked] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [jsonText, setJsonText] = useState("");
-  const [message, setMessage] = useState("");
 
-  const svgRef = useRef<SVGSVGElement>(null);
+  // Viewport camera (Pan & Zoom)
+  const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState<number>(1);
+  const [showGrid, setShowGrid] = useState<boolean>(true);
+  const [canvasBg, setCanvasBg] = useState<string>("#ffffff");
 
-  const drawingRef = useRef<{
-    startX: number;
-    startY: number;
-    draftId: string;
-    tool: Exclude<Tool, "select">;
+  // History for Undo / Redo
+  const [history, setHistory] = useState<Shape[][]>([[]]);
+  const [historyIndex, setHistoryIndex] = useState<number>(0);
+
+  // Default drawing properties (Excalidraw styling)
+  const [currentStyles, setCurrentStyles] = useState({
+    strokeColor: "#1e1e1e",
+    backgroundColor: "transparent",
+    fillStyle: "hachure" as FillStyle,
+    strokeWidth: 2,
+    strokeStyle: "solid" as StrokeStyle,
+    roughness: 1,
+    opacity: 100,
+  });
+
+  // DEV Mode JSON tab state
+  const [realTimeSync, setRealTimeSync] = useState(true);
+  const [manualJsonText, setManualJsonText] = useState("");
+  const [manualStatusMessage, setManualStatusMessage] = useState("");
+
+  const liveJson = JSON.stringify(
+    {
+      version: 1,
+      shapes,
+      appState: {
+        viewBackgroundColor: canvasBg,
+        grid: showGrid,
+      },
+    },
+    null,
+    2
+  );
+
+  const jsonText = realTimeSync ? liveJson : manualJsonText;
+  const statusMessage = realTimeSync
+    ? `Real-time synced (${shapes.length} ${shapes.length === 1 ? "shape" : "shapes"})`
+    : manualStatusMessage;
+
+  // In-line text editing
+  const [editingText, setEditingText] = useState<{
+    id: string;
+    x: number;
+    y: number;
+    text: string;
+    isNew: boolean;
   } | null>(null);
 
-  const draggingRef = useRef<{
-    lastX: number;
-    lastY: number;
-    shapeId: string;
-  } | null>(null);
+  // Refs for canvas and gestures
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  function handlePointerDown(
-    event: ReactPointerEvent<SVGSVGElement>
-  ) {
-    if (event.button !== 0) return;
+  const draftShapeRef = useRef<Shape | null>(null);
+  const isDraggingRef = useRef(false);
+  const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const initialShapeStateRef = useRef<Shape | null>(null);
+  const resizeHandleRef = useRef<ResizeHandle | null>(null);
+  const isPanningRef = useRef(false);
+  const [isSpacePressed, setIsSpacePressed] = useState(false);
 
-    const { x, y } = pointerPosition(event);
-    const target = event.target as Element;
-    const shapeElement = target.closest("[data-shape-id]");
-    const shapeId = shapeElement?.getAttribute("data-shape-id");
+  // Push state to undo/redo history
+  const pushHistory = useCallback(
+    (newShapes: Shape[]) => {
+      setHistory((prev) => {
+        const next = prev.slice(0, historyIndex + 1);
+        next.push(newShapes);
+        return next;
+      });
+      setHistoryIndex((prev) => prev + 1);
+    },
+    [historyIndex]
+  );
 
+  const canUndo = historyIndex > 0;
+  const canRedo = historyIndex < history.length - 1;
+
+  const handleUndo = useCallback(() => {
+    if (canUndo) {
+      const targetIndex = historyIndex - 1;
+      setHistoryIndex(targetIndex);
+      setShapes(history[targetIndex]);
+      setSelectedId(null);
+    }
+  }, [canUndo, historyIndex, history]);
+
+  const handleRedo = useCallback(() => {
+    if (canRedo) {
+      const targetIndex = historyIndex + 1;
+      setHistoryIndex(targetIndex);
+      setShapes(history[targetIndex]);
+      setSelectedId(null);
+    }
+  }, [canRedo, historyIndex, history]);
+
+  // Convert viewport screen coordinates to canvas space coordinates
+  const screenToCanvas = useCallback(
+    (clientX: number, clientY: number) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return { x: 0, y: 0 };
+      const rect = canvas.getBoundingClientRect();
+      const screenX = clientX - rect.left;
+      const screenY = clientY - rect.top;
+      return {
+        x: (screenX - pan.x) / zoom,
+        y: (screenY - pan.y) / zoom,
+      };
+    },
+    [pan, zoom]
+  );
+
+  // Main canvas render call
+  const triggerRender = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    renderCanvas(canvas, {
+      shapes,
+      selectedShapeId: selectedId,
+      draftShape: draftShapeRef.current,
+      pan,
+      zoom,
+      showGrid,
+      backgroundColor: canvasBg,
+    });
+  }, [shapes, selectedId, pan, zoom, showGrid, canvasBg]);
+
+  // Resize canvas to match window
+  useEffect(() => {
+    function handleResize() {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const dpr = window.devicePixelRatio || 1;
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
+
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.scale(dpr, dpr);
+      }
+      triggerRender();
+    }
+
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [triggerRender]);
+
+  useEffect(() => {
+    triggerRender();
+  }, [triggerRender]);
+
+  // Pointer Down (Mouse / Touch)
+  function handlePointerDown(e: ReactPointerEvent<HTMLCanvasElement>) {
+    // Only handle primary click
+    if (e.button !== 0 && e.button !== 1) return;
+
+    const { x, y } = screenToCanvas(e.clientX, e.clientY);
+    dragStartRef.current = { x, y };
+
+    // Handle middle click or spacebar pan
+    if (e.button === 1 || isSpacePressed || tool === "hand") {
+      isPanningRef.current = true;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      return;
+    }
+
+    // Eraser Tool
+    if (tool === "eraser") {
+      const hitShape = [...shapes].reverse().find((s) => isPointInShape(x, y, s));
+      if (hitShape) {
+        const nextShapes = shapes.filter((s) => s.id !== hitShape.id);
+        setShapes(nextShapes);
+        pushHistory(nextShapes);
+        if (selectedId === hitShape.id) setSelectedId(null);
+      }
+      return;
+    }
+
+    // Select Tool
     if (tool === "select") {
-      if (shapeId) {
-        setSelectedId(shapeId);
+      // 1. Check if clicking on a resize handle of the selected shape
+      if (selectedId) {
+        const selectedShape = shapes.find((s) => s.id === selectedId);
+        if (selectedShape) {
+          const bounds = getShapeBounds(selectedShape);
+          const handle = getHandleAtPoint(x, y, bounds, 12 / zoom);
+          if (handle) {
+            resizeHandleRef.current = handle;
+            initialShapeStateRef.current = { ...selectedShape };
+            e.currentTarget.setPointerCapture(e.pointerId);
+            return;
+          }
+        }
+      }
 
-        draggingRef.current = {
-          lastX: x,
-          lastY: y,
-          shapeId,
-        };
-
-        event.currentTarget.setPointerCapture(event.pointerId);
+      // 2. Check if clicking on an existing shape
+      const hitShape = [...shapes].reverse().find((s) => isPointInShape(x, y, s));
+      if (hitShape) {
+        setSelectedId(hitShape.id);
+        isDraggingRef.current = true;
+        initialShapeStateRef.current = { ...hitShape };
+        e.currentTarget.setPointerCapture(e.pointerId);
       } else {
         setSelectedId(null);
       }
-
       return;
     }
 
-    const id = createId();
+    // Text Tool
+    if (tool === "text") {
+      setEditingText({
+        id: createId(),
+        x,
+        y,
+        text: "",
+        isNew: true,
+      });
+      if (!isLocked) setTool("select");
+      return;
+    }
 
-    drawingRef.current = {
-      startX: x,
-      startY: y,
-      draftId: id,
-      tool,
+    // Shape Creation Tools (Rectangle, Diamond, Circle, Line, Arrow, Draw)
+    const newId = createId();
+    const seed = createSeed();
+    const commonProps = {
+      id: newId,
+      seed,
+      ...currentStyles,
     };
 
-    setSelectedId(id);
+    let initialDraft: Shape;
+    switch (tool) {
+      case "rectangle":
+        initialDraft = { ...commonProps, type: "rectangle", x, y, width: 0, height: 0 };
+        break;
+      case "diamond":
+        initialDraft = { ...commonProps, type: "diamond", x, y, width: 0, height: 0 };
+        break;
+      case "circle":
+        initialDraft = { ...commonProps, type: "circle", x, y, radius: 0 };
+        break;
+      case "arrow":
+        initialDraft = { ...commonProps, type: "arrow", x1: x, y1: y, x2: x, y2: y };
+        break;
+      case "line":
+        initialDraft = { ...commonProps, type: "line", x1: x, y1: y, x2: x, y2: y };
+        break;
+      case "draw":
+        initialDraft = { ...commonProps, type: "freedraw", points: [[x, y]] };
+        break;
+      default:
+        return;
+    }
 
-    const initialShape: Shape =
-      tool === "rectangle"
-        ? {
-            id,
-            type: "rectangle",
-            x,
-            y,
-            width: 0,
-            height: 0,
-          }
-        : tool === "circle"
-          ? {
-              id,
-              type: "circle",
-              x,
-              y,
-              radius: 0,
-            }
-          : {
-              id,
-              type: "line",
-              x1: x,
-              y1: y,
-              x2: x,
-              y2: y,
-            };
-
-    setShapes((previous) => [...previous, initialShape]);
-
-    event.currentTarget.setPointerCapture(event.pointerId);
+    draftShapeRef.current = initialDraft;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    triggerRender();
   }
 
-  function handlePointerMove(
-    event: ReactPointerEvent<SVGSVGElement>
-  ) {
-    const { x, y } = pointerPosition(event);
-
-    if (drawingRef.current) {
-      const drawing = drawingRef.current;
-      const dx = x - drawing.startX;
-      const dy = y - drawing.startY;
-
-      setShapes((previous) =>
-        previous.map((shape) => {
-          if (shape.id !== drawing.draftId) return shape;
-
-          switch (drawing.tool) {
-            case "rectangle":
-              return {
-                id: shape.id,
-                type: "rectangle",
-                x: Math.min(drawing.startX, x),
-                y: Math.min(drawing.startY, y),
-                width: Math.abs(dx),
-                height: Math.abs(dy),
-              };
-
-            case "circle":
-              return {
-                id: shape.id,
-                type: "circle",
-                x: drawing.startX,
-                y: drawing.startY,
-                radius: Math.hypot(dx, dy),
-              };
-
-            case "line":
-              return {
-                id: shape.id,
-                type: "line",
-                x1: drawing.startX,
-                y1: drawing.startY,
-                x2: x,
-                y2: y,
-              };
-          }
-        })
-      );
-
+  // Pointer Move
+  function handlePointerMove(e: ReactPointerEvent<HTMLCanvasElement>) {
+    // Panning canvas
+    if (isPanningRef.current) {
+      setPan((prev) => ({
+        x: prev.x + e.movementX,
+        y: prev.y + e.movementY,
+      }));
       return;
     }
 
-    if (draggingRef.current) {
-      const dragging = draggingRef.current;
-      const dx = x - dragging.lastX;
-      const dy = y - dragging.lastY;
+    const { x, y } = screenToCanvas(e.clientX, e.clientY);
 
-      dragging.lastX = x;
-      dragging.lastY = y;
+    // Eraser dragging
+    if (tool === "eraser" && e.buttons === 1) {
+      const hitShape = [...shapes].reverse().find((s) => isPointInShape(x, y, s));
+      if (hitShape) {
+        const nextShapes = shapes.filter((s) => s.id !== hitShape.id);
+        setShapes(nextShapes);
+        pushHistory(nextShapes);
+        if (selectedId === hitShape.id) setSelectedId(null);
+      }
+      return;
+    }
 
-      if (dx === 0 && dy === 0) return;
+    // Resizing shape via handle
+    if (resizeHandleRef.current && selectedId && initialShapeStateRef.current) {
+      const handle = resizeHandleRef.current;
+      const dx = x - dragStartRef.current.x;
+      const dy = y - dragStartRef.current.y;
 
-      setShapes((previous) =>
-        previous.map((shape) =>
-          shape.id === dragging.shapeId
-            ? moveShape(shape, dx, dy)
-            : shape
+      setShapes((prev) =>
+        prev.map((s) =>
+          s.id === selectedId
+            ? resizeShape(s, handle, dx, dy, initialShapeStateRef.current!)
+            : s
         )
       );
+      return;
     }
-  }
 
-  function handlePointerUp() {
-    if (drawingRef.current) {
-      const draft = drawingRef.current;
+    // Dragging selected shape
+    if (isDraggingRef.current && selectedId) {
+      const dx = x - dragStartRef.current.x;
+      const dy = y - dragStartRef.current.y;
+      dragStartRef.current = { x, y };
 
-      setShapes((previous) =>
-        previous.filter((shape) => {
-          if (shape.id !== draft.draftId) return true;
-
-          if (shape.type === "rectangle") {
-            return shape.width > 0 && shape.height > 0;
-          }
-
-          if (shape.type === "circle") {
-            return shape.radius > 0;
-          }
-
-          return shape.x1 !== shape.x2 || shape.y1 !== shape.y2;
-        })
+      setShapes((prev) =>
+        prev.map((s) => (s.id === selectedId ? moveShape(s, dx, dy) : s))
       );
-
-      drawingRef.current = null;
+      return;
     }
 
-    draggingRef.current = null;
+    // Drawing draft shape
+    if (draftShapeRef.current) {
+      const draft = draftShapeRef.current;
+      const start = dragStartRef.current;
+
+      switch (draft.type) {
+        case "rectangle":
+        case "diamond":
+          draftShapeRef.current = {
+            ...draft,
+            x: Math.min(start.x, x),
+            y: Math.min(start.y, y),
+            width: Math.abs(x - start.x),
+            height: Math.abs(y - start.y),
+          };
+          break;
+
+        case "circle":
+          draftShapeRef.current = {
+            ...draft,
+            radius: Math.hypot(x - start.x, y - start.y),
+          };
+          break;
+
+        case "line":
+        case "arrow":
+          draftShapeRef.current = {
+            ...draft,
+            x2: x,
+            y2: y,
+          };
+          break;
+
+        case "freedraw":
+          draftShapeRef.current = {
+            ...draft,
+            points: [...draft.points, [x, y]],
+          };
+          break;
+      }
+
+      triggerRender();
+    }
   }
 
-  function deleteSelected() {
+  // Pointer Up
+  function handlePointerUp() {
+    isPanningRef.current = false;
+
+    // Resizing finished
+    if (resizeHandleRef.current) {
+      resizeHandleRef.current = null;
+      initialShapeStateRef.current = null;
+      pushHistory(shapes);
+      return;
+    }
+
+    // Dragging finished
+    if (isDraggingRef.current) {
+      isDraggingRef.current = false;
+      initialShapeStateRef.current = null;
+      pushHistory(shapes);
+      return;
+    }
+
+    // Creating shape finished
+    if (draftShapeRef.current) {
+      const draft = draftShapeRef.current;
+      draftShapeRef.current = null;
+
+      let isValid = false;
+      if (draft.type === "rectangle" || draft.type === "diamond") {
+        isValid = draft.width > 3 && draft.height > 3;
+      } else if (draft.type === "circle") {
+        isValid = draft.radius > 3;
+      } else if (draft.type === "line" || draft.type === "arrow") {
+        isValid = Math.hypot(draft.x2 - draft.x1, draft.y2 - draft.y1) > 4;
+      } else if (draft.type === "freedraw") {
+        isValid = draft.points.length > 1;
+      }
+
+      if (isValid) {
+        const nextShapes = [...shapes, draft];
+        setShapes(nextShapes);
+        pushHistory(nextShapes);
+        setSelectedId(draft.id);
+
+        if (!isLocked) {
+          setTool("select");
+        }
+      } else {
+        triggerRender();
+      }
+    }
+  }
+
+  // Wheel Zoom & Pan
+  function handleWheel(e: React.WheelEvent<HTMLCanvasElement>) {
+    e.preventDefault();
+
+    if (e.ctrlKey || e.metaKey) {
+      // Zoom centered on cursor
+      const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
+      const newZoom = Math.min(3, Math.max(0.1, zoom * zoomFactor));
+
+      const rect = e.currentTarget.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      setPan({
+        x: mouseX - (mouseX - pan.x) * (newZoom / zoom),
+        y: mouseY - (mouseY - pan.y) * (newZoom / zoom),
+      });
+      setZoom(newZoom);
+    } else {
+      // Pan
+      setPan((prev) => ({
+        x: prev.x - e.deltaX,
+        y: prev.y - e.deltaY,
+      }));
+    }
+  }
+
+  // Keyboard actions ref for stable listener
+  const keyboardRef = useRef({
+    handleUndo,
+    handleRedo,
+    handleDuplicate: () => {},
+    handleDeleteSelected: () => {},
+    handleBringToFront: () => {},
+    handleSendToBack: () => {},
+    selectedId,
+    setTool,
+  });
+
+  // Keyboard Shortcuts
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // If typing in input/textarea, ignore shortcuts
+      const activeTag = document.activeElement?.tagName.toLowerCase();
+      if (activeTag === "input" || activeTag === "textarea") return;
+
+      if (e.code === "Space") {
+        setIsSpacePressed(true);
+      }
+
+      const actions = keyboardRef.current;
+
+      // Undo / Redo
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) actions.handleRedo();
+        else actions.handleUndo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        actions.handleRedo();
+        return;
+      }
+
+      // Duplicate
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        actions.handleDuplicate();
+        return;
+      }
+
+      // Delete
+      if ((e.key === "Delete" || e.key === "Backspace") && actions.selectedId) {
+        e.preventDefault();
+        actions.handleDeleteSelected();
+        return;
+      }
+
+      // Bring forward / send backward
+      if (e.key === "]" && actions.selectedId) {
+        actions.handleBringToFront();
+        return;
+      }
+      if (e.key === "[" && actions.selectedId) {
+        actions.handleSendToBack();
+        return;
+      }
+
+      // Tool switches
+      switch (e.key.toLowerCase()) {
+        case "h":
+          actions.setTool("hand");
+          break;
+        case "1":
+        case "v":
+          actions.setTool("select");
+          break;
+        case "2":
+        case "r":
+          actions.setTool("rectangle");
+          break;
+        case "3":
+        case "d":
+          actions.setTool("diamond");
+          break;
+        case "4":
+        case "c":
+          actions.setTool("circle");
+          break;
+        case "5":
+        case "a":
+          actions.setTool("arrow");
+          break;
+        case "6":
+        case "l":
+          actions.setTool("line");
+          break;
+        case "7":
+        case "p":
+          actions.setTool("draw");
+          break;
+        case "8":
+        case "t":
+          actions.setTool("text");
+          break;
+        case "0":
+        case "e":
+          actions.setTool("eraser");
+          break;
+      }
+    }
+
+    function handleKeyUp(e: KeyboardEvent) {
+      if (e.code === "Space") {
+        setIsSpacePressed(false);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, []);
+
+  // Selected Shape and Property Updates
+  const selectedShape = shapes.find((s) => s.id === selectedId) || null;
+
+  function handleUpdateStyle(updates: Partial<Shape>) {
+    setCurrentStyles((prev) => ({ ...prev, ...updates }));
+
+    if (selectedId) {
+      const nextShapes = shapes.map((s) =>
+        s.id === selectedId ? ({ ...s, ...updates } as Shape) : s
+      );
+      setShapes(nextShapes);
+      pushHistory(nextShapes);
+    }
+  }
+
+  const handleDuplicate = useCallback(() => {
     if (!selectedId) return;
+    const target = shapes.find((s) => s.id === selectedId);
+    if (!target) return;
 
-    setShapes((previous) =>
-      previous.filter((shape) => shape.id !== selectedId)
+    const newShape = moveShape(
+      { ...target, id: createId(), seed: createSeed() },
+      25,
+      25
     );
+    const nextShapes = [...shapes, newShape];
+    setShapes(nextShapes);
+    setSelectedId(newShape.id);
+    pushHistory(nextShapes);
+  }, [selectedId, shapes, pushHistory]);
 
+  const handleDeleteSelected = useCallback(() => {
+    if (!selectedId) return;
+    const nextShapes = shapes.filter((s) => s.id !== selectedId);
+    setShapes(nextShapes);
     setSelectedId(null);
+    pushHistory(nextShapes);
+  }, [selectedId, shapes, pushHistory]);
+
+  const handleBringToFront = useCallback(() => {
+    if (!selectedId) return;
+    const item = shapes.find((s) => s.id === selectedId);
+    if (!item) return;
+    const next = [...shapes.filter((s) => s.id !== selectedId), item];
+    setShapes(next);
+    pushHistory(next);
+  }, [selectedId, shapes, pushHistory]);
+
+  const handleSendToBack = useCallback(() => {
+    if (!selectedId) return;
+    const item = shapes.find((s) => s.id === selectedId);
+    if (!item) return;
+    const next = [item, ...shapes.filter((s) => s.id !== selectedId)];
+    setShapes(next);
+    pushHistory(next);
+  }, [selectedId, shapes, pushHistory]);
+
+  // Update keyboard actions ref on every render
+  useEffect(() => {
+    keyboardRef.current = {
+      handleUndo,
+      handleRedo,
+      handleDuplicate,
+      handleDeleteSelected,
+      handleBringToFront,
+      handleSendToBack,
+      selectedId,
+      setTool,
+    };
+  }, [
+    handleUndo,
+    handleRedo,
+    handleDuplicate,
+    handleDeleteSelected,
+    handleBringToFront,
+    handleSendToBack,
+    selectedId,
+  ]);
+
+  function handleClearCanvas() {
+    setShapes([]);
+    setSelectedId(null);
+    pushHistory([]);
   }
 
-  function exportJSON() {
-    const document: CanvasDocument = {
+  // Export JSON (Downloads the file)
+  function handleDownloadJson() {
+    const doc: CanvasDocument = {
       version: 1,
       shapes,
+      appState: {
+        viewBackgroundColor: canvasBg,
+        grid: showGrid,
+      },
     };
-
-    const json = JSON.stringify(document, null, 2);
-    setJsonText(json);
-
-    const blob = new Blob([json], {
-      type: "application/json",
-    });
-
+    const json = JSON.stringify(doc, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
     const url = URL.createObjectURL(blob);
-    const link = window.document.createElement("a");
-
+    const link = document.createElement("a");
     link.href = url;
     link.download = "whiteboard.json";
     link.click();
-
     URL.revokeObjectURL(url);
-    setMessage("JSON exported.");
+    setManualStatusMessage("whiteboard.json downloaded successfully.");
   }
 
-  async function importJSON(file: File) {
+  // Import JSON
+  async function handleImportJson(file: File) {
     try {
       const text = await file.text();
       const parsed: unknown = JSON.parse(text);
-
       if (!isValidDocument(parsed)) {
         throw new Error("Invalid whiteboard document format.");
       }
-
       setShapes(parsed.shapes);
       setSelectedId(null);
-      setJsonText(JSON.stringify(parsed, null, 2));
-      setMessage("Whiteboard loaded successfully.");
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "Could not load the file."
-      );
+      pushHistory(parsed.shapes);
+      if (parsed.appState?.viewBackgroundColor) {
+        setCanvasBg(parsed.appState.viewBackgroundColor);
+      }
+      if (parsed.appState?.grid !== undefined) {
+        setShowGrid(parsed.appState.grid);
+      }
+      setManualStatusMessage("Whiteboard loaded successfully.");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to load JSON file");
     }
   }
 
-  function loadFromText() {
+  // Export PNG Image
+  function handleExportImage() {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dataUrl = canvas.toDataURL("image/png");
+    const link = document.createElement("a");
+    link.href = dataUrl;
+    link.download = "whiteboard.png";
+    link.click();
+  }
+
+  // Apply JSON from Editor (DEV mode)
+  function handleApplyJsonFromEditor() {
     try {
       const parsed: unknown = JSON.parse(jsonText);
-
       if (!isValidDocument(parsed)) {
-        throw new Error("Invalid whiteboard document format.");
+        throw new Error("Invalid whiteboard format: check version & shapes.");
       }
-
       setShapes(parsed.shapes);
       setSelectedId(null);
-      setMessage("Whiteboard restored from JSON.");
-    } catch (error) {
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "Invalid JSON."
+      pushHistory(parsed.shapes);
+      setManualStatusMessage("Applied JSON to whiteboard successfully.");
+    } catch (err) {
+      setManualStatusMessage(
+        err instanceof Error ? `Error: ${err.message}` : "Invalid JSON."
       );
     }
   }
 
-  function handleKeyDown(
-    event: React.KeyboardEvent<HTMLDivElement>
-  ) {
-    if (
-      (event.key === "Delete" || event.key === "Backspace") &&
-      selectedId
-    ) {
-      event.preventDefault();
-      deleteSelected();
+  // Save in-place text shape
+  function handleSaveText(textValue: string) {
+    if (!editingText) return;
+    const trimmed = textValue.trim();
+    if (trimmed.length > 0) {
+      const newTextShape: Shape = {
+        id: editingText.id,
+        type: "text",
+        x: editingText.x,
+        y: editingText.y,
+        text: trimmed,
+        fontSize: 22,
+        seed: createSeed(),
+        ...currentStyles,
+      };
+      const nextShapes = [...shapes, newTextShape];
+      setShapes(nextShapes);
+      pushHistory(nextShapes);
+      setSelectedId(newTextShape.id);
     }
+    setEditingText(null);
   }
 
   return (
-    <main className="workspace" onKeyDown={handleKeyDown} tabIndex={0}>
-      <header className="topbar">
-        <div>
-          <h1>Collaborative Workspace</h1>
-          <p>Module 3 · Local whiteboard</p>
-        </div>
+    <div
+      className={`excalidraw-container ${isDevMode ? "mode-dev" : "mode-prod"}`}
+      ref={containerRef}
+    >
+      {/* Top Island Toolbar */}
+      <Toolbar
+        tool={tool}
+        setTool={setTool}
+        isLocked={isLocked}
+        setIsLocked={setIsLocked}
+        onClear={handleClearCanvas}
+        onExportImage={handleExportImage}
+        onExportJson={handleDownloadJson}
+        onImportJson={handleImportJson}
+        showGrid={showGrid}
+        setShowGrid={setShowGrid}
+        canvasBg={canvasBg}
+        setCanvasBg={setCanvasBg}
+        isDevMode={isDevMode}
+        onToggleDevPreview={() =>
+          setPreviewMode((prev) => (prev === "DEV" ? "PROD" : "DEV"))
+        }
+      />
 
-        <div className="toolbar">
-          {(["select", "rectangle", "circle", "line"] as Tool[]).map(
-            (item) => (
-              <button
-                key={item}
-                className={tool === item ? "active" : ""}
-                onClick={() => setTool(item)}
-              >
-                {item[0].toUpperCase() + item.slice(1)}
-              </button>
-            )
-          )}
+      {/* Left Properties Panel (when a shape or active styling tool is selected) */}
+      <PropertiesPanel
+        selectedShape={selectedShape}
+        currentStyles={currentStyles}
+        onUpdateStyle={handleUpdateStyle}
+        onDuplicate={handleDuplicate}
+        onDelete={handleDeleteSelected}
+        onBringToFront={handleBringToFront}
+        onSendToBack={handleSendToBack}
+      />
 
-          <button
-            onClick={deleteSelected}
-            disabled={!selectedId}
-          >
-            Delete
-          </button>
+      {/* Bottom Left Navigation Controls */}
+      <BottomControls
+        zoom={zoom}
+        onZoomIn={() => setZoom((prev) => Math.min(3, prev * 1.15))}
+        onZoomOut={() => setZoom((prev) => Math.max(0.1, prev / 1.15))}
+        onResetZoom={() => {
+          setZoom(1);
+          setPan({ x: 0, y: 0 });
+        }}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+      />
 
-          <button onClick={exportJSON}>Export JSON</button>
+      {/* Main Drawing Canvas */}
+      <canvas
+        ref={canvasRef}
+        className="whiteboard-canvas"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onWheel={handleWheel}
+        style={{
+          cursor:
+            tool === "hand" || isSpacePressed
+              ? "grab"
+              : tool === "select"
+              ? "default"
+              : tool === "eraser"
+              ? "not-allowed"
+              : "crosshair",
+        }}
+      />
 
-          <label className="file-button">
-            Load JSON
-            <input
-              type="file"
-              accept=".json,application/json"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-
-                if (file) void importJSON(file);
-
-                event.target.value = "";
-              }}
-            />
-          </label>
-        </div>
-      </header>
-
-      <section className="canvas-panel">
-        <div className="canvas-heading">
-          <span>Whiteboard</span>
-          <span>{shapes.length} shapes</span>
-        </div>
-
-        <svg
-          ref={svgRef}
-          className="canvas"
-          viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          onLostPointerCapture={handlePointerUp}
+      {/* In-line Text Input Overlay */}
+      {editingText && (
+        <div
+          className="text-input-overlay"
+          style={{
+            left: `${editingText.x * zoom + pan.x}px`,
+            top: `${editingText.y * zoom + pan.y}px`,
+          }}
         >
-          <defs>
-            <pattern
-              id="grid"
-              width="25"
-              height="25"
-              patternUnits="userSpaceOnUse"
-            >
-              <path
-                d="M 25 0 L 0 0 0 25"
-                fill="none"
-                stroke="#e9edf2"
-                strokeWidth="1"
-              />
-            </pattern>
-          </defs>
-
-          <rect
-            width={WIDTH}
-            height={HEIGHT}
-            fill="url(#grid)"
-            pointerEvents="none"
+          <textarea
+            autoFocus
+            className="text-editor-input"
+            defaultValue={editingText.text}
+            placeholder="Type text here..."
+            onBlur={(e) => handleSaveText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSaveText((e.target as HTMLTextAreaElement).value);
+              }
+              if (e.key === "Escape") {
+                setEditingText(null);
+              }
+            }}
           />
-
-          {shapes.map((shape) => (
-            <g
-              key={shape.id}
-              data-shape-id={shape.id}
-              style={{
-                cursor: tool === "select" ? "move" : "crosshair",
-              }}
-            >
-              <ShapeView
-                shape={shape}
-                selected={shape.id === selectedId}
-              />
-            </g>
-          ))}
-        </svg>
-      </section>
-
-      <section className="json-panel">
-        <div className="canvas-heading">
-          <span>Document JSON</span>
-          <button onClick={loadFromText}>Load from editor</button>
         </div>
+      )}
 
-        <textarea
-          value={jsonText}
-          onChange={(event) => setJsonText(event.target.value)}
-          placeholder="Export your drawing to inspect its JSON, or paste JSON here and load it."
-          spellCheck={false}
+      {/* DEV MODE: Bottom Real-Time JSON Tab (Only rendered in DEV mode!) */}
+      {isDevMode && (
+        <JsonTab
+          jsonText={jsonText}
+          onChangeJsonText={(text) => {
+            setRealTimeSync(false);
+            setManualJsonText(text);
+          }}
+          onApplyJson={handleApplyJsonFromEditor}
+          onDownloadJson={handleDownloadJson}
+          realTimeSync={realTimeSync}
+          onToggleRealTimeSync={() => setRealTimeSync((prev) => !prev)}
+          shapesCount={shapes.length}
+          statusMessage={statusMessage}
         />
-
-        <p className="status" role="status">{message}</p>
-      </section>
-    </main>
+      )}
+    </div>
   );
 }
