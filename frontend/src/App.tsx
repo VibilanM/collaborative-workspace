@@ -222,7 +222,7 @@ export default function App() {
 
     // Eraser Tool
     if (tool === "eraser") {
-      const hitShape = [...shapes].reverse().find((s) => isPointInShape(x, y, s));
+      const hitShape = [...shapes].reverse().find((s) => isPointInShape(x, y, s, 14));
       if (hitShape) {
         const nextShapes = shapes.filter((s) => s.id !== hitShape.id);
         setShapes(nextShapes);
@@ -328,7 +328,7 @@ export default function App() {
 
     // Eraser dragging
     if (tool === "eraser" && e.buttons === 1) {
-      const hitShape = [...shapes].reverse().find((s) => isPointInShape(x, y, s));
+      const hitShape = [...shapes].reverse().find((s) => isPointInShape(x, y, s, 14));
       if (hitShape) {
         const nextShapes = shapes.filter((s) => s.id !== hitShape.id);
         setShapes(nextShapes);
@@ -383,12 +383,20 @@ export default function App() {
           };
           break;
 
-        case "circle":
+        case "circle": {
+          const w = Math.abs(x - start.x);
+          const h = Math.abs(y - start.y);
+          const r = Math.max(w, h) / 2;
+          const signX = x >= start.x ? 1 : -1;
+          const signY = y >= start.y ? 1 : -1;
           draftShapeRef.current = {
             ...draft,
-            radius: Math.hypot(x - start.x, y - start.y),
+            x: start.x + signX * r,
+            y: start.y + signY * r,
+            radius: r,
           };
           break;
+        }
 
         case "line":
         case "arrow":
@@ -433,8 +441,31 @@ export default function App() {
 
     // Creating shape finished
     if (draftShapeRef.current) {
-      const draft = draftShapeRef.current;
+      let draft = draftShapeRef.current;
       draftShapeRef.current = null;
+
+      // If user just clicked without dragging (drag distance <= 4), spawn default shape centered at cursor
+      const start = dragStartRef.current;
+      const isClick =
+        (draft.type === "rectangle" && draft.width <= 4 && draft.height <= 4) ||
+        (draft.type === "diamond" && draft.width <= 4 && draft.height <= 4) ||
+        (draft.type === "circle" && draft.radius <= 4) ||
+        (draft.type === "line" && Math.hypot(draft.x2 - draft.x1, draft.y2 - draft.y1) <= 4) ||
+        (draft.type === "arrow" && Math.hypot(draft.x2 - draft.x1, draft.y2 - draft.y1) <= 4);
+
+      if (isClick) {
+        if (draft.type === "rectangle") {
+          draft = { ...draft, x: start.x - 60, y: start.y - 40, width: 120, height: 80 };
+        } else if (draft.type === "diamond") {
+          draft = { ...draft, x: start.x - 50, y: start.y - 50, width: 100, height: 100 };
+        } else if (draft.type === "circle") {
+          draft = { ...draft, x: start.x, y: start.y, radius: 45 };
+        } else if (draft.type === "line") {
+          draft = { ...draft, x1: start.x - 50, y1: start.y, x2: start.x + 50, y2: start.y };
+        } else if (draft.type === "arrow") {
+          draft = { ...draft, x1: start.x - 50, y1: start.y, x2: start.x + 50, y2: start.y };
+        }
+      }
 
       let isValid = false;
       if (draft.type === "rectangle" || draft.type === "diamond") {
@@ -857,7 +888,7 @@ export default function App() {
               : tool === "select"
               ? "default"
               : tool === "eraser"
-              ? "not-allowed"
+              ? "url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\"><circle cx=\"10\" cy=\"10\" r=\"8\" fill=\"rgba(239,68,68,0.2)\" stroke=\"%23ef4444\" stroke-width=\"1.5\"/><line x1=\"6\" y1=\"6\" x2=\"14\" y2=\"14\" stroke=\"%23ef4444\" stroke-width=\"1.5\"/></svg>') 10 10, crosshair"
               : "crosshair",
         }}
       />

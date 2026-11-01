@@ -29,18 +29,23 @@ export function renderCanvas(
     backgroundColor,
   } = options;
 
-  // Clear entire canvas
+  const dpr = window.devicePixelRatio || 1;
+
+  // Clear entire canvas in buffer pixel space
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = backgroundColor || "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Draw Excalidraw-style dot grid
+  // Set scale to DPR so all subsequent drawing uses CSS coordinate space (1:1 with cursor)
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // Draw Excalidraw-style dot grid in CSS coordinates
   if (showGrid) {
-    drawDotGrid(ctx, canvas.width, canvas.height, pan, zoom);
+    drawDotGrid(ctx, canvas.width / dpr, canvas.height / dpr, pan, zoom);
   }
 
-  // Apply camera transformation (pan and zoom)
+  // Apply camera transformation (pan and zoom) in CSS coordinates
   ctx.translate(pan.x, pan.y);
   ctx.scale(zoom, zoom);
 

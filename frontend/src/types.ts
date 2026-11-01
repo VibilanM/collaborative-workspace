@@ -113,23 +113,3 @@ export type BoundingBox = {
   width: number;
   height: number;
 };
-
-
-export type ResizeHandle =
-  | "nw"
-  | "n"
-  | "ne"
-  | "e"
-  | "se"
-  | "s"
-  | "sw"
-  | "w";
-
-export type BoundingBox = {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-  width: number;
-  height: number;
-};
