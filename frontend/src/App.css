@@ -1,6 +1,21 @@
 /* Excalidraw Dark Mode Styles */
 
-@import url('https://fonts.googleapis.com/css2?family=Virgil&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Architects+Daughter&family=Caveat:wght@600;700&family=Kalam:wght@400;700&family=Patrick+Hand&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* Official Excalidraw Fonts */
+@font-face {
+  font-family: 'Excalifont';
+  src: url('https://unpkg.com/@excalidraw/excalidraw/dist/excalidraw-assets/Excalifont-Regular.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/npm/@excalidraw/excalidraw/dist/excalidraw-assets/Excalifont-Regular.woff2') format('woff2');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Virgil';
+  src: url('https://unpkg.com/@excalidraw/excalidraw/dist/excalidraw-assets/Virgil.woff2') format('woff2'),
+       url('https://cdn.jsdelivr.net/npm/@excalidraw/excalidraw/dist/excalidraw-assets/Virgil.woff2') format('woff2');
+  font-display: swap;
+}
 
 :root {
   color-scheme: dark;
@@ -764,20 +779,21 @@ body {
 .text-input-overlay {
   position: absolute;
   z-index: 50;
-  transform: translate(0, 0);
+  display: flex;
 }
 
 .text-editor-input {
   min-width: 120px;
-  min-height: 40px;
-  padding: 4px 8px;
-  font-family: 'Virgil', 'Comic Sans MS', cursive, sans-serif;
-  font-size: 22px;
-  background: rgba(26, 26, 32, 0.95);
+  min-height: 38px;
+  padding: 2px 4px;
+  font-family: 'Excalifont', 'Virgil', 'Kalam', 'Patrick Hand', 'Architects Daughter', cursive, sans-serif;
+  letter-spacing: 0.3px;
+  background: rgba(18, 18, 22, 0.94);
   border: 1.5px dashed var(--accent-color);
   border-radius: 4px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7);
   outline: none;
-  resize: both;
-  color: #ececf1;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
 }

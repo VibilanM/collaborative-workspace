@@ -20,6 +20,7 @@ interface PropertiesPanelProps {
     strokeStyle: StrokeStyle;
     roughness: number;
     opacity: number;
+    fontSize?: number;
   };
   onUpdateStyle: (updates: Partial<Shape>) => void;
   onDuplicate: () => void;
@@ -48,24 +49,25 @@ export function PropertiesPanel({
 
   const strokeColors = [
     { label: "Crisp White", color: "#f8fafc" },
-    { label: "Electric Violet", color: "#a78bfa" },
-    { label: "Luminous Cyan", color: "#38bdf8" },
-    { label: "Mint Green", color: "#4ade80" },
-    { label: "Radiant Amber", color: "#fbbf24" },
-    { label: "Coral Red", color: "#f87171" },
-    { label: "Neon Pink", color: "#f472b6" },
-    { label: "Slate Gray", color: "#94a3b8" },
+    { label: "Soft Red", color: "#ff8787" },
+    { label: "Soft Green", color: "#69db7c" },
+    { label: "Soft Blue", color: "#74c0fc" },
+    { label: "Soft Amber", color: "#ffd43b" },
+    { label: "Soft Purple", color: "#b197fc" },
+    { label: "Soft Teal", color: "#63e6be" },
+    { label: "Soft Rose", color: "#f783ac" },
   ];
 
   const backgroundColors = [
     { label: "Transparent", color: "transparent" },
-    { label: "Violet Glow", color: "rgba(167, 139, 250, 0.25)" },
-    { label: "Cyan Glow", color: "rgba(56, 189, 248, 0.25)" },
-    { label: "Green Glow", color: "rgba(74, 222, 128, 0.25)" },
-    { label: "Amber Glow", color: "rgba(251, 191, 36, 0.25)" },
-    { label: "Coral Glow", color: "rgba(248, 113, 113, 0.25)" },
-    { label: "Pink Glow", color: "rgba(244, 114, 182, 0.25)" },
-    { label: "Charcoal Slate", color: "rgba(148, 163, 184, 0.2)" },
+    { label: "Bottle Green", color: "rgba(16, 185, 129, 0.48)" },
+    { label: "Cobalt Blue", color: "rgba(59, 130, 246, 0.48)" },
+    { label: "Amber Gold", color: "rgba(245, 158, 11, 0.48)" },
+    { label: "Ruby Red", color: "rgba(239, 68, 68, 0.48)" },
+    { label: "Amethyst Violet", color: "rgba(168, 85, 247, 0.48)" },
+    { label: "Sea Glass Teal", color: "rgba(20, 184, 166, 0.48)" },
+    { label: "Plum Rose", color: "rgba(236, 72, 153, 0.48)" },
+    { label: "Smoked Slate", color: "rgba(100, 116, 139, 0.45)" },
   ];
 
   return (
@@ -102,7 +104,7 @@ export function PropertiesPanel({
               key={c.color}
               className={`color-btn ${backgroundColor === c.color ? "active" : ""}`}
               style={{
-                backgroundColor: c.color === "transparent" ? "#1e1e24" : c.color,
+                backgroundColor: c.color === "transparent" ? "#141418" : c.color,
                 backgroundImage:
                   c.color === "transparent"
                     ? "linear-gradient(45deg, #333 25%, transparent 25%), linear-gradient(-45deg, #333 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #333 75%), linear-gradient(-45deg, transparent 75%, #333 75%)"
@@ -113,6 +115,13 @@ export function PropertiesPanel({
               title={c.label}
             />
           ))}
+          <input
+            type="color"
+            value={backgroundColor.startsWith("#") ? backgroundColor : "#059669"}
+            onChange={(e) => onUpdateStyle({ backgroundColor: e.target.value })}
+            className="color-picker-input"
+            title="Custom background color"
+          />
         </div>
       </div>
 
@@ -163,6 +172,35 @@ export function PropertiesPanel({
           ))}
         </div>
       </div>
+
+      {/* Font Size (when text shape is selected or global styles) */}
+      {(selectedShape?.type === "text" || !selectedShape) && (
+        <div className="prop-group">
+          <label className="prop-label">Font size</label>
+          <div className="btn-toggle-row">
+            {[
+              { label: "S", val: 16 },
+              { label: "M", val: 22 },
+              { label: "L", val: 28 },
+              { label: "XL", val: 36 },
+            ].map((item) => {
+              const activeFontSize =
+                selectedShape?.type === "text"
+                  ? (selectedShape.fontSize ?? 22)
+                  : (currentStyles.fontSize ?? 22);
+              return (
+                <button
+                  key={item.val}
+                  className={`toggle-btn ${activeFontSize === item.val ? "active" : ""}`}
+                  onClick={() => onUpdateStyle({ fontSize: item.val })}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Stroke Style */}
       <div className="prop-group">

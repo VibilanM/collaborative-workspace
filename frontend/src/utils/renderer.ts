@@ -6,6 +6,7 @@ export interface RenderOptions {
   shapes: Shape[];
   selectedShapeId: string | null;
   draftShape: Shape | null;
+  editingShapeId?: string | null;
   pan: { x: number; y: number };
   zoom: number;
   backgroundColor: string;
@@ -22,6 +23,7 @@ export function renderCanvas(
     shapes,
     selectedShapeId,
     draftShape,
+    editingShapeId,
     pan,
     zoom,
     backgroundColor,
@@ -44,8 +46,11 @@ export function renderCanvas(
 
   const rc = rough.canvas(canvas);
 
-  // Draw all existing shapes
+  // Draw all existing shapes (omit one being edited in live DOM overlay)
   for (const shape of shapes) {
+    if (editingShapeId && shape.id === editingShapeId) {
+      continue;
+    }
     drawShape(ctx, rc, shape);
   }
 
@@ -59,7 +64,7 @@ export function renderCanvas(
     const selectedShape = shapes.find((s) => s.id === selectedShapeId);
     if (selectedShape) {
       const bounds = getShapeBounds(selectedShape);
-      drawSelectionBox(ctx, bounds, zoom);
+      drawSelectionBox(ctx, bounds, zoom, selectedShape.type !== "text");
     }
   }
 
@@ -81,13 +86,16 @@ function getRoughOptions(shape: Shape) {
     strokeWidth: shape.strokeWidth || 2,
     fill: bg,
     fillStyle: (shape.fillStyle || "hachure") as "hachure" | "cross-hatch" | "solid",
-    fillWeight: (shape.strokeWidth || 2) / 2,
+    fillWeight: Math.max(1.2, (shape.strokeWidth || 2) * 0.6),
     hachureGap: 4,
     roughness: shape.roughness ?? 1,
     strokeLineDash,
     seed: shape.seed || 123456,
   };
 }
+
+export const EXCALIDRAW_FONT =
+  "'Excalifont', 'Virgil', 'Kalam', 'Patrick Hand', 'Architects Daughter', cursive, sans-serif";
 
 function drawShape(
   ctx: CanvasRenderingContext2D,
@@ -159,11 +167,15 @@ function drawShape(
     }
 
     case "text": {
-      const fontSize = shape.fontSize || 20;
-      ctx.font = `${fontSize}px 'Virgil', 'Comic Sans MS', 'Chalkboard SE', 'Segoe UI', cursive, sans-serif`;
+      const fontSize = shape.fontSize || 22;
+      ctx.font = `${fontSize}px ${EXCALIDRAW_FONT}`;
       ctx.fillStyle = shape.strokeColor || "#f8fafc";
       ctx.textBaseline = "top";
-      ctx.fillText(shape.text, shape.x, shape.y);
+      const lines = (shape.text || "").split("\n");
+      const lineHeight = fontSize * 1.25;
+      lines.forEach((line, index) => {
+        ctx.fillText(line, shape.x, shape.y + index * lineHeight);
+      });
       break;
     }
   }
@@ -174,7 +186,8 @@ function drawShape(
 function drawSelectionBox(
   ctx: CanvasRenderingContext2D,
   bounds: BoundingBox,
-  zoom: number
+  zoom: number,
+  showHandles: boolean = true
 ) {
   const padding = 6 / zoom;
   const minX = bounds.minX - padding;
@@ -190,35 +203,37 @@ function drawSelectionBox(
   ctx.setLineDash([4 / zoom, 4 / zoom]);
   ctx.strokeRect(minX, minY, width, height);
 
-  // Draw resize handles
-  const handleSize = 8 / zoom;
-  const handles = getHandlePositions({
-    minX,
-    minY,
-    maxX,
-    maxY,
-    width,
-    height,
-  });
+  if (showHandles) {
+    // Draw resize handles for shapes that support resizing
+    const handleSize = 8 / zoom;
+    const handles = getHandlePositions({
+      minX,
+      minY,
+      maxX,
+      maxY,
+      width,
+      height,
+    });
 
-  ctx.setLineDash([]);
-  ctx.fillStyle = "#141418";
-  ctx.strokeStyle = "#818cf8";
-  ctx.lineWidth = 1.5 / zoom;
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#141418";
+    ctx.strokeStyle = "#818cf8";
+    ctx.lineWidth = 1.5 / zoom;
 
-  for (const pos of Object.values(handles) as { x: number; y: number }[]) {
-    ctx.fillRect(
-      pos.x - handleSize / 2,
-      pos.y - handleSize / 2,
-      handleSize,
-      handleSize
-    );
-    ctx.strokeRect(
-      pos.x - handleSize / 2,
-      pos.y - handleSize / 2,
-      handleSize,
-      handleSize
-    );
+    for (const pos of Object.values(handles) as { x: number; y: number }[]) {
+      ctx.fillRect(
+        pos.x - handleSize / 2,
+        pos.y - handleSize / 2,
+        handleSize,
+        handleSize
+      );
+      ctx.strokeRect(
+        pos.x - handleSize / 2,
+        pos.y - handleSize / 2,
+        handleSize,
+        handleSize
+      );
+    }
   }
 
   ctx.restore();

@@ -63,10 +63,16 @@ export function getShapeBounds(shape: Shape): BoundingBox {
     }
 
     case "text": {
-      const fontSize = shape.fontSize || 20;
-      // Approximate text width: ~0.6 * fontSize per character
-      const width = Math.max(20, (shape.text || "").length * (fontSize * 0.6));
-      const height = fontSize * 1.3;
+      const fontSize = shape.fontSize || 22;
+      const lines = (shape.text || "").split("\n");
+      const lineHeight = fontSize * 1.25;
+      let maxLineWidth = 0;
+      for (const line of lines) {
+        const lineWidth = Math.max(24, line.length * (fontSize * 0.62));
+        if (lineWidth > maxLineWidth) maxLineWidth = lineWidth;
+      }
+      const width = maxLineWidth;
+      const height = Math.max(lineHeight, lines.length * lineHeight);
       return {
         minX: shape.x,
         minY: shape.y,
@@ -160,10 +166,10 @@ export function isPointInShape(
 
     case "text":
       return (
-        px >= bounds.minX &&
-        px <= bounds.maxX &&
-        py >= bounds.minY &&
-        py <= bounds.maxY
+        px >= bounds.minX - tolerance &&
+        px <= bounds.maxX + tolerance &&
+        py >= bounds.minY - tolerance &&
+        py <= bounds.maxY + tolerance
       );
   }
 }

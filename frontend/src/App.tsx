@@ -63,6 +63,7 @@ export default function App() {
     strokeStyle: "solid" as StrokeStyle,
     roughness: 1,
     opacity: 100,
+    fontSize: 22,
   });
 
   // DEV Mode JSON tab state
@@ -94,8 +95,11 @@ export default function App() {
     x: number;
     y: number;
     text: string;
+    fontSize: number;
     isNew: boolean;
   } | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const isInitialMountRef = useRef(false);
 
   // Refs for canvas and gestures
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -108,6 +112,7 @@ export default function App() {
   const resizeHandleRef = useRef<ResizeHandle | null>(null);
   const isPanningRef = useRef(false);
   const [isSpacePressed, setIsSpacePressed] = useState(false);
+  const [hoveredShapeId, setHoveredShapeId] = useState<string | null>(null);
 
   // Push state to undo/redo history
   const pushHistory = useCallback(
@@ -167,11 +172,12 @@ export default function App() {
       shapes,
       selectedShapeId: selectedId,
       draftShape: draftShapeRef.current,
+      editingShapeId: editingText?.id,
       pan,
       zoom,
       backgroundColor: canvasBg,
     });
-  }, [shapes, selectedId, pan, zoom, canvasBg]);
+  }, [shapes, selectedId, editingText?.id, pan, zoom, canvasBg]);
 
   // Resize canvas to match window
   useEffect(() => {
@@ -203,8 +209,96 @@ export default function App() {
     triggerRender();
   }, [triggerRender]);
 
+  // Re-render canvas when web fonts finish loading in browser
+  useEffect(() => {
+    if (document.fonts) {
+      document.fonts.ready.then(() => {
+        triggerRender();
+      });
+    }
+  }, [triggerRender]);
+
+  // Save in-place text shape
+  const handleSaveText = useCallback(
+    (textValue: string) => {
+      if (!editingText) return;
+      const trimmed = textValue.trim();
+
+      if (editingText.isNew) {
+        if (trimmed.length > 0) {
+          const newTextShape: Shape = {
+            id: editingText.id,
+            type: "text",
+            x: editingText.x,
+            y: editingText.y,
+            text: trimmed,
+            fontSize: editingText.fontSize || currentStyles.fontSize || 22,
+            seed: createSeed(),
+            ...currentStyles,
+          };
+          const nextShapes = [...shapes, newTextShape];
+          setShapes(nextShapes);
+          pushHistory(nextShapes);
+          setSelectedId(newTextShape.id);
+        }
+      } else {
+        // Editing existing text shape
+        if (trimmed.length > 0) {
+          const nextShapes = shapes.map((s) =>
+            s.id === editingText.id ? ({ ...s, text: trimmed } as Shape) : s
+          );
+          setShapes(nextShapes);
+          pushHistory(nextShapes);
+          setSelectedId(editingText.id);
+        } else {
+          // If text was cleared completely, delete the shape
+          const nextShapes = shapes.filter((s) => s.id !== editingText.id);
+          setShapes(nextShapes);
+          pushHistory(nextShapes);
+          setSelectedId(null);
+        }
+      }
+
+      setEditingText(null);
+      if (!isLocked) {
+        setTool("select");
+      }
+    },
+    [editingText, currentStyles, shapes, pushHistory, isLocked]
+  );
+
+  // Auto-focus and auto-resize textarea when text editing starts
+  useEffect(() => {
+    if (editingText) {
+      isInitialMountRef.current = true;
+      const timer = setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+          const len = textareaRef.current.value.length;
+          textareaRef.current.setSelectionRange(len, len);
+          textareaRef.current.style.height = "auto";
+          textareaRef.current.style.height = `${Math.max(38, textareaRef.current.scrollHeight)}px`;
+          textareaRef.current.style.width = "auto";
+          textareaRef.current.style.width = `${Math.max(120, textareaRef.current.scrollWidth + 12)}px`;
+        }
+        setTimeout(() => {
+          isInitialMountRef.current = false;
+        }, 120);
+      }, 30);
+      return () => clearTimeout(timer);
+    }
+  }, [editingText]);
+
   // Pointer Down (Mouse / Touch)
   function handlePointerDown(e: ReactPointerEvent<HTMLCanvasElement>) {
+    // If text was being edited and user clicks on canvas, commit it first
+    if (editingText) {
+      if (textareaRef.current) {
+        handleSaveText(textareaRef.current.value);
+      }
+      return;
+    }
+
     // Only handle primary click
     if (e.button !== 0 && e.button !== 1) return;
 
@@ -232,10 +326,10 @@ export default function App() {
 
     // Select Tool
     if (tool === "select") {
-      // 1. Check if clicking on a resize handle of the selected shape
+      // 1. Check if clicking on a resize handle of the selected shape (excluding text shapes!)
       if (selectedId) {
         const selectedShape = shapes.find((s) => s.id === selectedId);
-        if (selectedShape) {
+        if (selectedShape && selectedShape.type !== "text") {
           const bounds = getShapeBounds(selectedShape);
           const handle = getHandleAtPoint(x, y, bounds, 12 / zoom);
           if (handle) {
@@ -247,12 +341,24 @@ export default function App() {
         }
       }
 
-      // 2. Check if clicking on an existing shape
-      const hitShape = [...shapes].reverse().find((s) => isPointInShape(x, y, s));
+      // 2. Check if clicking on an existing shape (giving priority to currently selected shape)
+      let hitShape: Shape | undefined = undefined;
+      if (selectedId) {
+        const currentSelected = shapes.find((s) => s.id === selectedId);
+        if (currentSelected && isPointInShape(x, y, currentSelected, 12)) {
+          hitShape = currentSelected;
+        }
+      }
+
+      if (!hitShape) {
+        hitShape = [...shapes].reverse().find((s) => isPointInShape(x, y, s, 10));
+      }
+
       if (hitShape) {
         setSelectedId(hitShape.id);
         isDraggingRef.current = true;
         initialShapeStateRef.current = { ...hitShape };
+        dragStartRef.current = { x, y };
         e.currentTarget.setPointerCapture(e.pointerId);
       } else {
         setSelectedId(null);
@@ -267,9 +373,9 @@ export default function App() {
         x,
         y,
         text: "",
+        fontSize: currentStyles.fontSize || 22,
         isNew: true,
       });
-      if (!isLocked) setTool("select");
       return;
     }
 
@@ -414,6 +520,13 @@ export default function App() {
       }
 
       triggerRender();
+      return;
+    }
+
+    // Update cursor hover state when in select mode
+    if (tool === "select") {
+      const hit = [...shapes].reverse().find((s) => isPointInShape(x, y, s, 10));
+      setHoveredShapeId(hit ? hit.id : null);
     }
   }
 
@@ -518,6 +631,23 @@ export default function App() {
     }
   }
 
+  // Double Click on canvas to edit text shape
+  function handleDoubleClick(e: React.MouseEvent<HTMLCanvasElement>) {
+    const { x, y } = screenToCanvas(e.clientX, e.clientY);
+    const hitShape = [...shapes].reverse().find((s) => isPointInShape(x, y, s));
+    if (hitShape && hitShape.type === "text") {
+      setEditingText({
+        id: hitShape.id,
+        x: hitShape.x,
+        y: hitShape.y,
+        text: hitShape.text,
+        fontSize: hitShape.fontSize || 22,
+        isNew: false,
+      });
+      setSelectedId(null);
+    }
+  }
+
   // Keyboard actions ref for stable listener
   const keyboardRef = useRef({
     handleUndo,
@@ -526,6 +656,7 @@ export default function App() {
     handleDeleteSelected: () => {},
     handleBringToFront: () => {},
     handleSendToBack: () => {},
+    handleStartEditText: () => {},
     selectedId,
     setTool,
   });
@@ -542,6 +673,13 @@ export default function App() {
       }
 
       const actions = keyboardRef.current;
+
+      // Enter to edit selected text shape
+      if (e.key === "Enter" && actions.selectedId) {
+        e.preventDefault();
+        actions.handleStartEditText();
+        return;
+      }
 
       // Undo / Redo
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
@@ -695,6 +833,22 @@ export default function App() {
     pushHistory(next);
   }, [selectedId, shapes, pushHistory]);
 
+  const handleStartEditText = useCallback(() => {
+    if (!selectedId) return;
+    const target = shapes.find((s) => s.id === selectedId);
+    if (target && target.type === "text") {
+      setEditingText({
+        id: target.id,
+        x: target.x,
+        y: target.y,
+        text: target.text,
+        fontSize: target.fontSize || 22,
+        isNew: false,
+      });
+      setSelectedId(null);
+    }
+  }, [selectedId, shapes]);
+
   // Update keyboard actions ref on every render
   useEffect(() => {
     keyboardRef.current = {
@@ -704,6 +858,7 @@ export default function App() {
       handleDeleteSelected,
       handleBringToFront,
       handleSendToBack,
+      handleStartEditText,
       selectedId,
       setTool,
     };
@@ -714,6 +869,7 @@ export default function App() {
     handleDeleteSelected,
     handleBringToFront,
     handleSendToBack,
+    handleStartEditText,
     selectedId,
   ]);
 
@@ -793,28 +949,7 @@ export default function App() {
     }
   }
 
-  // Save in-place text shape
-  function handleSaveText(textValue: string) {
-    if (!editingText) return;
-    const trimmed = textValue.trim();
-    if (trimmed.length > 0) {
-      const newTextShape: Shape = {
-        id: editingText.id,
-        type: "text",
-        x: editingText.x,
-        y: editingText.y,
-        text: trimmed,
-        fontSize: 22,
-        seed: createSeed(),
-        ...currentStyles,
-      };
-      const nextShapes = [...shapes, newTextShape];
-      setShapes(nextShapes);
-      pushHistory(nextShapes);
-      setSelectedId(newTextShape.id);
-    }
-    setEditingText(null);
-  }
+
 
   return (
     <div
@@ -871,15 +1006,20 @@ export default function App() {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
+        onDoubleClick={handleDoubleClick}
         onWheel={handleWheel}
         style={{
           cursor:
             tool === "hand" || isSpacePressed
               ? "grab"
-              : tool === "select"
-              ? "default"
               : tool === "eraser"
               ? "url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\"><circle cx=\"10\" cy=\"10\" r=\"8\" fill=\"rgba(239,68,68,0.2)\" stroke=\"%23ef4444\" stroke-width=\"1.5\"/><line x1=\"6\" y1=\"6\" x2=\"14\" y2=\"14\" stroke=\"%23ef4444\" stroke-width=\"1.5\"/></svg>') 10 10, crosshair"
+              : tool === "text"
+              ? "text"
+              : tool === "select"
+              ? hoveredShapeId
+                ? "move"
+                : "default"
               : "crosshair",
         }}
       />
@@ -889,23 +1029,54 @@ export default function App() {
         <div
           className="text-input-overlay"
           style={{
-            left: `${editingText.x * zoom + pan.x}px`,
-            top: `${editingText.y * zoom + pan.y}px`,
+            left: `${editingText.x * zoom + pan.x - 4}px`,
+            top: `${editingText.y * zoom + pan.y - 2}px`,
           }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
         >
           <textarea
-            autoFocus
+            ref={textareaRef}
             className="text-editor-input"
             defaultValue={editingText.text}
             placeholder="Type text here..."
-            onBlur={(e) => handleSaveText(e.target.value)}
+            style={{
+              fontSize: `${(editingText.fontSize || 22) * zoom}px`,
+              lineHeight: 1.25,
+              color: currentStyles.strokeColor || "#f8fafc",
+              fontFamily: "'Excalifont', 'Virgil', 'Kalam', 'Patrick Hand', 'Architects Daughter', cursive, sans-serif",
+            }}
+            onInput={(e) => {
+              const el = e.currentTarget;
+              el.style.height = "auto";
+              el.style.height = `${Math.max(38, el.scrollHeight)}px`;
+              el.style.width = "auto";
+              el.style.width = `${Math.max(120, el.scrollWidth + 12)}px`;
+            }}
+            onBlur={(e) => {
+              if (isInitialMountRef.current) {
+                e.target.focus();
+                return;
+              }
+              handleSaveText(e.target.value);
+            }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
                 e.preventDefault();
                 handleSaveText((e.target as HTMLTextAreaElement).value);
+                return;
               }
               if (e.key === "Escape") {
-                setEditingText(null);
+                e.preventDefault();
+                const val = (e.target as HTMLTextAreaElement).value.trim();
+                if (val.length > 0) {
+                  handleSaveText((e.target as HTMLTextAreaElement).value);
+                } else {
+                  setEditingText(null);
+                  if (!isLocked) setTool("select");
+                }
               }
             }}
           />
