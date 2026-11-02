@@ -47,25 +47,25 @@ export function PropertiesPanel({
   const opacity = selectedShape?.opacity ?? currentStyles.opacity;
 
   const strokeColors = [
-    { label: "Black", color: "#1e1e1e" },
-    { label: "Red", color: "#e03131" },
-    { label: "Green", color: "#2f9e44" },
-    { label: "Blue", color: "#1971c2" },
-    { label: "Orange", color: "#f08c00" },
-    { label: "Purple", color: "#6965db" },
-    { label: "Pink", color: "#d6336c" },
-    { label: "Gray", color: "#868e96" },
+    { label: "Crisp White", color: "#f8fafc" },
+    { label: "Electric Violet", color: "#a78bfa" },
+    { label: "Luminous Cyan", color: "#38bdf8" },
+    { label: "Mint Green", color: "#4ade80" },
+    { label: "Radiant Amber", color: "#fbbf24" },
+    { label: "Coral Red", color: "#f87171" },
+    { label: "Neon Pink", color: "#f472b6" },
+    { label: "Slate Gray", color: "#94a3b8" },
   ];
 
   const backgroundColors = [
     { label: "Transparent", color: "transparent" },
-    { label: "Light Red", color: "#ffc9c9" },
-    { label: "Light Green", color: "#b2f2bb" },
-    { label: "Light Blue", color: "#a5d8ff" },
-    { label: "Light Yellow", color: "#ffec99" },
-    { label: "Light Purple", color: "#eebefa" },
-    { label: "Light Pink", color: "#fcc2d7" },
-    { label: "Light Gray", color: "#e9ecef" },
+    { label: "Violet Glow", color: "rgba(167, 139, 250, 0.25)" },
+    { label: "Cyan Glow", color: "rgba(56, 189, 248, 0.25)" },
+    { label: "Green Glow", color: "rgba(74, 222, 128, 0.25)" },
+    { label: "Amber Glow", color: "rgba(251, 191, 36, 0.25)" },
+    { label: "Coral Glow", color: "rgba(248, 113, 113, 0.25)" },
+    { label: "Pink Glow", color: "rgba(244, 114, 182, 0.25)" },
+    { label: "Charcoal Slate", color: "rgba(148, 163, 184, 0.2)" },
   ];
 
   return (
@@ -85,7 +85,7 @@ export function PropertiesPanel({
           ))}
           <input
             type="color"
-            value={strokeColor.startsWith("#") ? strokeColor : "#1e1e1e"}
+            value={strokeColor.startsWith("#") ? strokeColor : "#ececf1"}
             onChange={(e) => onUpdateStyle({ strokeColor: e.target.value })}
             className="color-picker-input"
             title="Custom stroke color"
@@ -102,10 +102,10 @@ export function PropertiesPanel({
               key={c.color}
               className={`color-btn ${backgroundColor === c.color ? "active" : ""}`}
               style={{
-                backgroundColor: c.color === "transparent" ? "#ffffff" : c.color,
+                backgroundColor: c.color === "transparent" ? "#1e1e24" : c.color,
                 backgroundImage:
                   c.color === "transparent"
-                    ? "linear-gradient(45deg, #ddd 25%, transparent 25%), linear-gradient(-45deg, #ddd 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ddd 75%), linear-gradient(-45deg, transparent 75%, #ddd 75%)"
+                    ? "linear-gradient(45deg, #333 25%, transparent 25%), linear-gradient(-45deg, #333 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #333 75%), linear-gradient(-45deg, transparent 75%, #333 75%)"
                     : "none",
                 backgroundSize: "6px 6px",
               }}

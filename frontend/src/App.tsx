@@ -48,16 +48,15 @@ export default function App() {
   // Viewport camera (Pan & Zoom)
   const [pan, setPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [zoom, setZoom] = useState<number>(1);
-  const [showGrid, setShowGrid] = useState<boolean>(true);
-  const [canvasBg, setCanvasBg] = useState<string>("#ffffff");
+  const [canvasBg, setCanvasBg] = useState<string>("#000000");
 
   // History for Undo / Redo
   const [history, setHistory] = useState<Shape[][]>([[]]);
   const [historyIndex, setHistoryIndex] = useState<number>(0);
 
-  // Default drawing properties (Excalidraw styling)
+  // Default drawing properties (Excalidraw deep dark styling)
   const [currentStyles, setCurrentStyles] = useState({
-    strokeColor: "#1e1e1e",
+    strokeColor: "#f8fafc",
     backgroundColor: "transparent",
     fillStyle: "hachure" as FillStyle,
     strokeWidth: 2,
@@ -77,7 +76,7 @@ export default function App() {
       shapes,
       appState: {
         viewBackgroundColor: canvasBg,
-        grid: showGrid,
+        grid: false,
       },
     },
     null,
@@ -170,10 +169,9 @@ export default function App() {
       draftShape: draftShapeRef.current,
       pan,
       zoom,
-      showGrid,
       backgroundColor: canvasBg,
     });
-  }, [shapes, selectedId, pan, zoom, showGrid, canvasBg]);
+  }, [shapes, selectedId, pan, zoom, canvasBg]);
 
   // Resize canvas to match window
   useEffect(() => {
@@ -732,7 +730,7 @@ export default function App() {
       shapes,
       appState: {
         viewBackgroundColor: canvasBg,
-        grid: showGrid,
+        grid: false,
       },
     };
     const json = JSON.stringify(doc, null, 2);
@@ -759,9 +757,6 @@ export default function App() {
       pushHistory(parsed.shapes);
       if (parsed.appState?.viewBackgroundColor) {
         setCanvasBg(parsed.appState.viewBackgroundColor);
-      }
-      if (parsed.appState?.grid !== undefined) {
-        setShowGrid(parsed.appState.grid);
       }
       setManualStatusMessage("Whiteboard loaded successfully.");
     } catch (err) {
@@ -836,10 +831,6 @@ export default function App() {
         onExportImage={handleExportImage}
         onExportJson={handleDownloadJson}
         onImportJson={handleImportJson}
-        showGrid={showGrid}
-        setShowGrid={setShowGrid}
-        canvasBg={canvasBg}
-        setCanvasBg={setCanvasBg}
         isDevMode={isDevMode}
         onToggleDevPreview={() =>
           setPreviewMode((prev) => (prev === "DEV" ? "PROD" : "DEV"))

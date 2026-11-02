@@ -8,7 +8,6 @@ export interface RenderOptions {
   draftShape: Shape | null;
   pan: { x: number; y: number };
   zoom: number;
-  showGrid: boolean;
   backgroundColor: string;
 }
 
@@ -25,7 +24,6 @@ export function renderCanvas(
     draftShape,
     pan,
     zoom,
-    showGrid,
     backgroundColor,
   } = options;
 
@@ -34,16 +32,11 @@ export function renderCanvas(
   // Clear entire canvas in buffer pixel space
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = backgroundColor || "#ffffff";
+  ctx.fillStyle = backgroundColor || "#000000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   // Set scale to DPR so all subsequent drawing uses CSS coordinate space (1:1 with cursor)
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-  // Draw Excalidraw-style dot grid in CSS coordinates
-  if (showGrid) {
-    drawDotGrid(ctx, canvas.width / dpr, canvas.height / dpr, pan, zoom);
-  }
 
   // Apply camera transformation (pan and zoom) in CSS coordinates
   ctx.translate(pan.x, pan.y);
@@ -73,31 +66,8 @@ export function renderCanvas(
   ctx.restore();
 }
 
-function drawDotGrid(
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  pan: { x: number; y: number },
-  zoom: number
-) {
-  const gridSize = 20 * zoom;
-  if (gridSize < 10) return; // Don't draw if too small
-
-  const startX = (pan.x % gridSize);
-  const startY = (pan.y % gridSize);
-
-  ctx.fillStyle = "#d3d3d8";
-  const dotSize = Math.max(1, 1.2 * zoom);
-
-  for (let x = startX; x < width; x += gridSize) {
-    for (let y = startY; y < height; y += gridSize) {
-      ctx.fillRect(x, y, dotSize, dotSize);
-    }
-  }
-}
-
 function getRoughOptions(shape: Shape) {
-  const stroke = shape.strokeColor || "#1e1e1e";
+  const stroke = shape.strokeColor || "#f8fafc";
   const bg = shape.backgroundColor && shape.backgroundColor !== "transparent"
     ? shape.backgroundColor
     : undefined;
@@ -191,7 +161,7 @@ function drawShape(
     case "text": {
       const fontSize = shape.fontSize || 20;
       ctx.font = `${fontSize}px 'Virgil', 'Comic Sans MS', 'Chalkboard SE', 'Segoe UI', cursive, sans-serif`;
-      ctx.fillStyle = shape.strokeColor || "#1e1e1e";
+      ctx.fillStyle = shape.strokeColor || "#f8fafc";
       ctx.textBaseline = "top";
       ctx.fillText(shape.text, shape.x, shape.y);
       break;
@@ -215,7 +185,7 @@ function drawSelectionBox(
   const height = maxY - minY;
 
   ctx.save();
-  ctx.strokeStyle = "#6965db"; // Excalidraw signature selection purple
+  ctx.strokeStyle = "#818cf8"; // Distinct indigo-violet on dark background
   ctx.lineWidth = 1.5 / zoom;
   ctx.setLineDash([4 / zoom, 4 / zoom]);
   ctx.strokeRect(minX, minY, width, height);
@@ -232,8 +202,8 @@ function drawSelectionBox(
   });
 
   ctx.setLineDash([]);
-  ctx.fillStyle = "#ffffff";
-  ctx.strokeStyle = "#6965db";
+  ctx.fillStyle = "#141418";
+  ctx.strokeStyle = "#818cf8";
   ctx.lineWidth = 1.5 / zoom;
 
   for (const pos of Object.values(handles) as { x: number; y: number }[]) {

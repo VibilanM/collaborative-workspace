@@ -18,8 +18,6 @@ import {
   Upload,
   Image,
   Trash2,
-  Grid,
-  Check,
 } from "lucide-react";
 
 interface ToolbarProps {
@@ -31,10 +29,6 @@ interface ToolbarProps {
   onExportImage: () => void;
   onExportJson: () => void;
   onImportJson: (file: File) => void;
-  showGrid: boolean;
-  setShowGrid: (show: boolean) => void;
-  canvasBg: string;
-  setCanvasBg: (bg: string) => void;
   isDevMode: boolean;
   onToggleDevPreview?: () => void;
 }
@@ -48,10 +42,6 @@ export function Toolbar({
   onExportImage,
   onExportJson,
   onImportJson,
-  showGrid,
-  setShowGrid,
-  canvasBg,
-  setCanvasBg,
   isDevMode,
   onToggleDevPreview,
 }: ToolbarProps) {
@@ -82,14 +72,6 @@ export function Toolbar({
     { id: "draw", label: "Draw", icon: Pencil, shortcut: "7" },
     { id: "text", label: "Text", icon: Type, shortcut: "8" },
     { id: "eraser", label: "Eraser", icon: Eraser, shortcut: "0" },
-  ];
-
-  const canvasBgColors = [
-    { label: "White", value: "#ffffff" },
-    { label: "Soft cream", value: "#fdfbf7" },
-    { label: "Warm gray", value: "#f8f9fa" },
-    { label: "Muted purple", value: "#f5f3ff" },
-    { label: "Dark charcoal", value: "#1e1e1e" },
   ];
 
   return (
@@ -148,32 +130,6 @@ export function Toolbar({
                 <Image size={16} />
                 <span>Export as PNG image</span>
               </button>
-            </div>
-
-            <div className="dropdown-divider" />
-
-            <div className="dropdown-section">
-              <button
-                className="dropdown-item"
-                onClick={() => setShowGrid(!showGrid)}
-              >
-                <Grid size={16} />
-                <span>Show grid</span>
-                {showGrid && <Check size={14} className="check-icon" />}
-              </button>
-
-              <div className="dropdown-submenu-title">Canvas background</div>
-              <div className="color-palette-small">
-                {canvasBgColors.map((c) => (
-                  <button
-                    key={c.value}
-                    className={`color-swatch-sm ${canvasBg === c.value ? "active" : ""}`}
-                    style={{ backgroundColor: c.value }}
-                    onClick={() => setCanvasBg(c.value)}
-                    title={c.label}
-                  />
-                ))}
-              </div>
             </div>
 
             <div className="dropdown-divider" />
